@@ -218,6 +218,25 @@ void editorAppendRow(char *s, size_t len) {
 	editorUpdateRow(&E.row[at]);
 }
 
+void editorRowInsertChar(erow *row, int at, char c) {
+	if(at < 0 || at > row->size) at = row->size;
+	// extra char + null byte
+	row->chars = realloc(row->chars, row->size + 2);
+	memmove(&row->chars[at+1], &row->chars[at], row->size - at + 1);
+	row->size++;
+	row->chars[at] = c;
+	editorUpdateRow(row);
+}
+
+/* Row Operations */
+
+void editorInsertChar(char c) {
+	// Cursor at new row
+	if(E.cy == E.numRows) editorAppendRow("", 0);
+	editorRowInsertChar(&E.row[E.cy], E.cx, c);
+	E.cx++;
+}
+
 /* File I/O */
 
 void editorOpen(char* filename) {
@@ -332,6 +351,9 @@ void editorProcessKeypress() {
 			write(STDOUT_FILENO, "\x1b[2J", 4);
 			write(STDOUT_FILENO, "\x1b[1;1H", 6);
 			exit(0);
+			break;
+		default:
+			editorInsertChar((char)key);
 			break;
 	}
 }
