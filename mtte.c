@@ -40,17 +40,24 @@ enum editorKey {
 
 enum editorHighlight {
 	HL_NORMAL = 0,
+	HL_COMMENT,
+	HL_KEYWORD1,
+	HL_KEYWORD2,
+	HL_STRING,
 	HL_NUMBER,
 	HL_MATCH
 };
 
 #define HL_HIGHLIGHT_NUMBERS (1<<0)
+#define HL_HIGHLIGHT_STRINGS (1<<1)
 
 /* data */
 
 struct editorSyntax {
 	char* filetype;
 	char** filematch;
+	char** keywords;
+	char* singleLineCommentStart;
 	int flags;
 };
 
@@ -84,12 +91,21 @@ struct editorConfig E;
 /* File Types */
 
 char* C_HL_extensions[] = {".c", ".h", ".cpp"};
+char* C_HL_keywords[] = {
+	"switch", "if", "while", "for", "break", "continue", "return", "else",
+ 	"struct", "union", "typedef", "static", "enum", "class", "case", "const",
+
+ 	"int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",
+	"void|", NULL
+};
 
 struct editorSyntax HLDB[] = {
 	{
 		"c",
 		C_HL_extensions,
-		HL_HIGHLIGHT_NUMBERS
+		C_HL_keywords,
+		"//",
+		HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
 	},
 };
 
@@ -214,7 +230,7 @@ int getWindowSize(int* rows, int* cols) {
 /* Syntax Highlighting */
 
 int isseparator(int c) {
-	return isspace(c) || c == '\0' || strchr(",.()+-/*=~%<>[];", c) != NULL;
+	return isspace(c) || c == '\0' || strchr(",.()+-/*=~%<>[]{};", c) != NULL;
 }
 
 void editorUpdateSyntax(erow *row) {
@@ -223,12 +239,46 @@ void editorUpdateSyntax(erow *row) {
 
 	if(E.syntax == NULL) return;
 
+	char** keywords = E.syntax->keywords;
+
+	char *scs = E.syntax->singleLineCommentStart;
+	int scsLen = scs ? strlen(scs) : 0;
+
 	int prevSep = 1;
+	int inString = 0;
 
 	int i = 0;
 	while(i < row->rsize) {
 		char c = row->render[i];
 		unsigned char prevHl = i > 0 ? row->hl[i-1] : HL_NORMAL;
+
+		if(scsLen && !inString) {
+			if(!strncmp(&row->render[i], scs, scsLen)) {
+				memset(&row->hl[i], HL_COMMENT, row->rsize - i);
+				break;
+			}
+		}
+
+		if(E.syntax->flags & HL_HIGHLIGHT_STRINGS) {
+			if(inString) {
+				row->hl[i] = HL_STRING;
+				if(c == '\\' && i + 1 < row->size) {
+					row->hl[i+1] = HL_STRING;
+					i += 2;
+					continue;
+				}
+				if(c == inString) inString = 0;
+				++i;
+				prevSep = 1;
+				continue;
+			} else {
+				if(c == '"' || c == '\'') {
+					inString = c;
+					row->hl[i++] = HL_STRING;
+					continue;
+				}
+			}
+		} 
 
 		if(E.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
 			if((isdigit(row->render[i]) && (prevSep || prevHl == HL_NUMBER))
@@ -239,6 +289,26 @@ void editorUpdateSyntax(erow *row) {
 			} 
 		}
 
+		if(prevSep) {
+			int j;
+			for(j = 0; keywords[j]; j++) {
+				int klen = strlen(keywords[j]);
+				int kw2 = keywords[j][klen-1] == '|'	;
+				if(kw2) klen--;
+
+				if(!strncmp(&row->render[i], keywords[j], klen) &&
+						isseparator(row->render[i + klen])) {
+					memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
+					i += klen;
+					break;
+				}
+			}
+			if(keywords[j] != NULL) {
+				prevSep = 0;
+				continue;
+			}
+		}
+
 		prevSep = isseparator(c);
 		++i;
 	}
@@ -246,7 +316,11 @@ void editorUpdateSyntax(erow *row) {
 
 int editorSyntaxToColour(int hl) {
 	switch(hl) {
+		case HL_COMMENT: return 36;
+		case HL_KEYWORD1: return 33;
+		case HL_KEYWORD2: return 32;
 		case HL_NUMBER: return 31;
+		case HL_STRING: return 35;
 		case HL_MATCH: return 34;
 		default: return 37;
 	}
